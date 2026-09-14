@@ -1,0 +1,4 @@
+# Copy to .dev.vars and fill in real values
+JWT_SECRET="your-super-secret-jwt-key-min-32-chars"
+STRIPE_SECRET_KEY="sk_test_..."
+TURNSTILE_SECRET="1x0000000000000000000000000000000AA"
