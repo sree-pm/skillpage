@@ -1,18 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  PORTFOLIO_THEMES,
-  SECTION_LABELS,
-  SECTION_VARIANTS,
-  clonePortfolio,
-  createStarterPortfolio,
-  type PortfolioDocument,
-  type PortfolioThemeId,
-  type SectionNode,
-  type SectionType,
-} from '@skillpage/portfolio-core';
+import { PORTFOLIO_THEMES, SECTION_LABELS, SECTION_VARIANTS, clonePortfolio, createStarterPortfolio, type PortfolioDocument, type PortfolioThemeId, type SectionNode, type SectionType } from '@skillpage/portfolio-core';
 import { PortfolioRenderer } from '@/components/portfolio/PortfolioRenderer';
 
 type Panel = 'content' | 'design' | 'sections' | 'settings';
@@ -52,9 +42,12 @@ export default function PortfolioStudio() {
       const base = process.env.NEXT_PUBLIC_API_URL || '';
       const headers: HeadersInit = { 'Content-Type': 'application/json' };
       if (token) headers.Authorization = `Bearer ${token}`;
-      const endpoint = `${base}/api/portfolio/${publish ? 'publish' : 'document'}`;
-      const response = await fetch(endpoint, { method: publish ? 'POST' : 'PUT', headers, body: JSON.stringify({ document }) });
-      if (!response.ok) throw new Error(`Portfolio save failed: ${response.status}`);
+      const saveResponse = await fetch(`${base}/api/portfolio/document`, { method: 'PUT', headers, body: JSON.stringify(document) });
+      if (!saveResponse.ok) throw new Error(`Portfolio save failed: ${saveResponse.status}`);
+      if (publish) {
+        const publishResponse = await fetch(`${base}/api/portfolio/publish`, { method: 'POST', headers });
+        if (!publishResponse.ok) throw new Error(`Portfolio publish failed: ${publishResponse.status}`);
+      }
       setStatus(publish ? 'published' : 'saved');
     } catch {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
