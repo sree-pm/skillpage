@@ -19,7 +19,6 @@ This branch treats Portfolio as an independent product module. Marketplace, proj
 - SEO title/description and visibility controls.
 - Static-site import data model and isolated publishing boundary documentation.
 - CI build/typecheck workflow added.
-- Portfolio core document tests added.
 
 ## Deliberately not marked complete
 
@@ -30,6 +29,10 @@ This branch treats Portfolio as an independent product module. Marketplace, proj
 - Accessibility audit and automated Lighthouse/axe gates.
 - Production auth/session hardening from the wider SkillPage audit.
 - Real-money marketplace/payment implementation. Stripe Connect and project state machines remain separate modules.
+
+## Verification status
+
+The branch has a CI workflow configured to run the web build and API TypeScript check, but this conversation has not received a successful workflow result yet. Do not treat the branch as runtime-verified until GitHub Actions passes.
 
 ## Quality rule
 
