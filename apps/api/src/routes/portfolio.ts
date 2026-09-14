@@ -37,13 +37,15 @@ portfolioRoutes.put('/document', async (c) => {
   const db = c.env.DB;
   const profile = await db.prepare('SELECT id, handle FROM profiles WHERE user_id = ?').bind(user.id).first<{ id: string; handle: string }>();
   if (!profile) return c.json({ error: { code: 'PROFILE_REQUIRED', message: 'Create your profile before saving a portfolio' } }, 409);
-  let site = await db.prepare('SELECT id, current_version FROM portfolio_sites WHERE profile_id = ?').bind(profile.id).first<{ id: string; current_version: number }>();
+  let site = await db.prepare('SELECT id, current_version, slug FROM portfolio_sites WHERE profile_id = ?').bind(profile.id).first<{ id: string; current_version: number; slug: string }>();
+  const conflicting = await db.prepare(`SELECT ps.id FROM portfolio_sites ps JOIN profiles p ON p.id = ps.profile_id WHERE ps.slug = ? AND p.user_id != ? LIMIT 1`).bind(document.profile.handle, user.id).first<{ id: string }>();
+  if (conflicting) return c.json({ error: { code: 'HANDLE_TAKEN', message: 'That public handle is already in use' } }, 409);
   const now = new Date().toISOString();
   if (!site) {
     const siteId = crypto.randomUUID();
     await db.prepare(`INSERT INTO portfolio_sites (id, profile_id, source_type, status, current_version, slug, created_at, updated_at) VALUES (?, ?, ?, 'draft', 0, ?, ?, ?)`)
       .bind(siteId, profile.id, document.source, document.profile.handle, now, now).run();
-    site = { id: siteId, current_version: 0 };
+    site = { id: siteId, current_version: 0, slug: document.profile.handle };
   }
   const nextVersion = Number(site.current_version) + 1;
   await db.prepare(`INSERT INTO portfolio_versions (id, site_id, version, source_type, document_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
@@ -65,7 +67,7 @@ portfolioRoutes.post('/rollback/:version', async (c) => {
   const user = c.get('user') as JWTUser;
   const target = Number(c.req.param('version'));
   if (!Number.isInteger(target) || target < 1) return c.json({ error: { code: 'INVALID_VERSION', message: 'Invalid portfolio version' } }, 400);
-  const profile = await c.env.DB.prepare('SELECT id, handle FROM profiles WHERE user_id = ?').bind(user.id).first<{ id: string; handle: string }>();
+  const profile = await c.env.DB.prepare('SELECT id, handle FROM profiles WHERE user_id = ?').bind(user.id).first<{ id: string }>();
   if (!profile) return c.json({ error: { code: 'PROFILE_REQUIRED', message: 'Profile not found' } }, 404);
   const site = await c.env.DB.prepare('SELECT id FROM portfolio_sites WHERE profile_id = ?').bind(profile.id).first<{ id: string }>();
   if (!site) return c.json({ error: { code: 'PORTFOLIO_REQUIRED', message: 'Portfolio not found' } }, 404);
