@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import { isPortfolioDocument, type PortfolioDocument } from '@skillpage/portfolio-core';
-import { validatePortfolioDocument } from '@skillpage/portfolio-core/src/validate';
+import { validatePortfolioDocument, type PortfolioDocument } from '@skillpage/portfolio-core';
 import type { JWTUser } from '../lib/jwt';
 
 const MAX_DOCUMENT_BYTES = 200_000;
@@ -28,7 +27,7 @@ portfolioRoutes.put('/document', async (c) => {
   let value: unknown;
   try { value = JSON.parse(raw); } catch { return c.json({ error: { code: 'INVALID_JSON', message: 'Invalid portfolio document' } }, 400); }
   const validation = validatePortfolioDocument(value);
-  if (!validation.valid || !isPortfolioDocument(value)) return c.json({ error: { code: 'INVALID_DOCUMENT', message: 'Portfolio document failed validation', details: validation.valid ? [] : validation.errors } }, 400);
+  if (!validation.valid) return c.json({ error: { code: 'INVALID_DOCUMENT', message: 'Portfolio document failed validation', details: validation.errors } }, 400);
   const document = validation.document as PortfolioDocument;
   const db = c.env.DB;
   const profile = await db.prepare('SELECT id, handle FROM profiles WHERE user_id = ?').bind(user.id).first<{ id: string; handle: string }>();
