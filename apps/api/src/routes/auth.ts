@@ -1,64 +1,106 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createJWT } from '../lib/jwt';
+import { generateOTP, getExpiryDate, sendOTP, OTP_CONFIG } from '../lib/otp';
+import { rateLimit } from '../middleware/rate-limit';
+import { writeAuditLog } from '../lib/audit';
 
-const signupSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  displayName: z.string().min(2),
-  handle: z.string().min(3).regex(/^[a-z0-9-]+$/),
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string(),
-});
+const otpRequestSchema = z.object({ email: z.string().email() });
+const otpVerifySchema = z.object({ email: z.string().email(), code: z.string().length(6) });
 
 export const authRoutes = new Hono();
 
-authRoutes.post('/signup', async (c) => {
+// Rate limit: 3 OTP requests per hour per IP
+authRoutes.post('/otp/request', rateLimit({ max: 3, windowMs: 60 * 60 * 1000 }), async (c) => {
   try {
     const body = await c.req.json();
-    const { email, password, displayName, handle } = signupSchema.parse(body);
+    const { email } = otpRequestSchema.parse(body);
     const db = c.env.DB;
-    const existingUser: any = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
-    if (existingUser) return c.json({ error: { code: 'EMAIL_EXISTS', message: 'Email already registered' } }, 409);
-    const existingProfile: any = await db.prepare('SELECT id FROM profiles WHERE handle = ?').bind(handle).first();
-    if (existingProfile) return c.json({ error: { code: 'HANDLE_EXISTS', message: 'Handle already taken' } }, 409);
-    const userId = crypto.randomUUID();
-    const passwordHash = await hashPassword(password);
+
+    // Generate OTP
+    const code = generateOTP(OTP_CONFIG.length);
+    const otpId = crypto.randomUUID();
+    const expiresAt = getExpiryDate(OTP_CONFIG.ttlMinutes);
     const now = new Date().toISOString();
-    await db.batch([
-      db.prepare(`INSERT INTO users (id, email, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'user', ?, ?)`).bind(userId, email, passwordHash, now, now),
-      db.prepare(`INSERT INTO profiles (id, user_id, handle, display_name, created_at, updated_at, is_published) VALUES (?, ?, ?, ?, ?, ?, 1)`).bind(userId, userId, handle, displayName, now, now),
-    ]);
-    const token = await createJWT({ id: userId, email, role: 'user' });
-    return c.json({ user: { id: userId, email, role: 'user' }, token, message: 'Account created successfully' });
+
+    // Store OTP
+    await db.prepare(`INSERT INTO otp_codes (id, email, code, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .bind(otpId, email, code, expiresAt, now).run();
+
+    // Send email
+    await sendOTP(email, code);
+
+    // Audit log
+    await writeAuditLog(db, 'system', 'otp_requested', 'user', email, null, null, c.req.header('CF-Connecting-IP') || '', c.req.header('User-Agent') || '');
+
+    return c.json({ message: 'OTP sent to your email', expiresAt });
   } catch (err: any) {
     if (err instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: err.errors[0].message } }, 400);
-    console.error('Signup error:', err);
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to create account' } }, 500);
+    console.error('OTP request error:', err);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to send OTP' } }, 500);
   }
 });
 
-authRoutes.post('/login', async (c) => {
+authRoutes.post('/otp/verify', async (c) => {
   try {
     const body = await c.req.json();
-    const { email, password } = loginSchema.parse(body);
+    const { email, code } = otpVerifySchema.parse(body);
     const db = c.env.DB;
-    const user: any = await db.prepare('SELECT id, email, password_hash, role FROM users WHERE email = ? AND is_banned = 0').bind(email).first();
-    if (!user || !(await verifyPassword(password, user.password_hash))) return c.json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' } }, 401);
+
+    // Find OTP
+    const otp: any = await db.prepare('SELECT * FROM otp_codes WHERE email = ? AND code = ? AND consumed = 0 ORDER BY created_at DESC LIMIT 1').bind(email, code).first();
+    if (!otp) return c.json({ error: { code: 'INVALID_OTP', message: 'Invalid or expired OTP' } }, 400);
+
+    // Check expiry
+    if (new Date(otp.expires_at) < new Date()) {
+      await db.prepare('UPDATE otp_codes SET consumed = 1 WHERE id = ?').bind(otp.id).run();
+      return c.json({ error: { code: 'OTP_EXPIRED', message: 'OTP has expired' } }, 400);
+    }
+
+    // Check attempts
+    if (otp.attempts >= OTP_CONFIG.maxAttempts) {
+      await db.prepare('UPDATE otp_codes SET consumed = 1 WHERE id = ?').bind(otp.id).run();
+      return c.json({ error: { code: 'OTP_MAX_ATTEMPTS', message: 'Maximum attempts reached' } }, 400);
+    }
+
+    // Mark as consumed
+    await db.prepare('UPDATE otp_codes SET consumed = 1 WHERE id = ?').bind(otp.id).run();
+
+    // Get or create user
+    let user: any = await db.prepare('SELECT id, email, role, email_verified FROM users WHERE email = ?').bind(email).first();
+    const isNewUser = !user;
+
+    if (isNewUser) {
+      const userId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      await db.prepare(`INSERT INTO users (id, email, email_verified, role, created_at, updated_at) VALUES (?, ?, 1, 'user', ?, ?)`)
+        .bind(userId, email, now, now).run();
+      user = { id: userId, email, role: 'user', email_verified: 1 };
+
+      // Create default profile
+      const handle = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
+      await db.prepare(`INSERT INTO profiles (id, user_id, handle, display_name, created_at, updated_at, is_published) VALUES (?, ?, ?, ?, ?, ?, 1)`)
+        .bind(userId, userId, handle, email.split('@')[0], now, now).run();
+    } else if (!user.email_verified) {
+      await db.prepare('UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?').bind(new Date().toISOString(), user.id).run();
+      user.email_verified = 1;
+    }
+
+    // Issue JWT
     const token = await createJWT({ id: user.id, email: user.email, role: user.role });
-    await db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').bind(new Date().toISOString(), new Date().toISOString(), user.id).run();
-    return c.json({ user: { id: user.id, email: user.email, role: user.role }, token, message: 'Login successful' });
+
+    // Audit log
+    await writeAuditLog(db, user.id, 'otp_verified', 'user', user.id, null, { isNewUser }, c.req.header('CF-Connecting-IP') || '', c.req.header('User-Agent') || '');
+
+    return c.json({
+      user: { id: user.id, email: user.email, role: user.role, email_verified: user.email_verified },
+      token,
+      isNewUser,
+      message: 'Login successful',
+    });
   } catch (err: any) {
     if (err instanceof z.ZodError) return c.json({ error: { code: 'VALIDATION_ERROR', message: err.errors[0].message } }, 400);
-    console.error('Login error:', err);
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to login' } }, 500);
+    console.error('OTP verify error:', err);
+    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to verify OTP' } }, 500);
   }
 });
-
-authRoutes.post('/verify-email', async (c) => c.json({ message: 'Email verification not yet implemented' }));
-
-async function hashPassword(password: string): Promise<string> { return 'hashed_' + password; }
-async function verifyPassword(password: string, hash: string): Promise<boolean> { return hash === 'hashed_' + password; }
