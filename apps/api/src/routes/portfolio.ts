@@ -13,11 +13,9 @@ portfolioRoutes.get('/me', async (c) => {
   if (!site) return c.json({ site: null, document: null });
   const versionNumber = Number(site.current_version || site.published_version || 0);
   if (!versionNumber) return c.json({ site, document: null });
-  const version = await db.prepare(`SELECT document_json, version, published_at FROM portfolio_versions WHERE site_id = ? AND version = ?`)
-    .bind(site.id, versionNumber).first<{ document_json: string; version: number; published_at: string | null }>();
+  const version = await db.prepare(`SELECT document_json, version, published_at FROM portfolio_versions WHERE site_id = ? AND version = ?`).bind(site.id, versionNumber).first<{ document_json: string; version: number; published_at: string | null }>();
   if (!version) return c.json({ site, document: null });
-  try { return c.json({ site, version: version.version, publishedAt: version.published_at, document: JSON.parse(version.document_json) }); }
-  catch { return c.json({ error: { code: 'CORRUPT_DOCUMENT', message: 'Portfolio version is unavailable' } }, 500); }
+  try { return c.json({ site, version: version.version, publishedAt: version.published_at, document: JSON.parse(version.document_json) }); } catch { return c.json({ error: { code: 'CORRUPT_DOCUMENT', message: 'Portfolio version is unavailable' } }, 500); }
 });
 
 portfolioRoutes.get('/versions', async (c) => {
@@ -49,17 +47,15 @@ portfolioRoutes.put('/document', async (c) => {
   const nextVersion = Number(site.current_version) + 1;
   await db.prepare(`INSERT INTO portfolio_versions (id, site_id, version, source_type, document_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(crypto.randomUUID(), site.id, nextVersion, document.source, JSON.stringify(document), now).run();
-  await db.prepare(`UPDATE portfolio_sites SET source_type = ?, slug = ?, current_version = ?, updated_at = ? WHERE id = ?`)
-    .bind(document.source, document.profile.handle, nextVersion, now, site.id).run();
+  await db.prepare(`UPDATE portfolio_sites SET source_type = ?, slug = ?, current_version = ?, updated_at = ? WHERE id = ?`).bind(document.source, document.profile.handle, nextVersion, now, site.id).run();
   return c.json({ siteId: site.id, version: nextVersion, savedAt: now });
 });
 
 portfolioRoutes.post('/publish', async (c) => {
   const user = c.get('user') as JWTUser;
-  const db = c.env.DB;
-  const profile = await db.prepare('SELECT id, handle FROM profiles WHERE user_id = ?').bind(user.id).first<{ id: string; handle: string }>();
+  const profile = await c.env.DB.prepare('SELECT id, handle FROM profiles WHERE user_id = ?').bind(user.id).first<{ id: string; handle: string }>();
   if (!profile) return c.json({ error: { code: 'PROFILE_REQUIRED', message: 'Create your profile before publishing' } }, 409);
-  const site = await db.prepare('SELECT id, current_version FROM portfolio_sites WHERE profile_id = ?').bind(profile.id).first<{ id: string; current_version: number }>();
+  const site = await c.env.DB.prepare('SELECT id, current_version FROM portfolio_sites WHERE profile_id = ?').bind(profile.id).first<{ id: string; current_version: number }>();
   if (!site || !site.current_version) return c.json({ error: { code: 'DRAFT_REQUIRED', message: 'Save a portfolio before publishing' } }, 409);
   return publishVersion(c, site.id, site.current_version, profile.id, profile.handle);
 });
@@ -72,12 +68,9 @@ portfolioRoutes.post('/rollback/:version', async (c) => {
   if (!profile) return c.json({ error: { code: 'PROFILE_REQUIRED', message: 'Profile not found' } }, 404);
   const site = await c.env.DB.prepare('SELECT id FROM portfolio_sites WHERE profile_id = ?').bind(profile.id).first<{ id: string }>();
   if (!site) return c.json({ error: { code: 'PORTFOLIO_REQUIRED', message: 'Portfolio not found' } }, 404);
-  const version = await c.env.DB.prepare('SELECT document_json, source_type FROM portfolio_versions WHERE site_id = ? AND version = ?').bind(site.id, target).first<{ document_json: string; source_type: PortfolioDocument['source'] }>();
+  const version = await c.env.DB.prepare('SELECT document_json FROM portfolio_versions WHERE site_id = ? AND version = ?').bind(site.id, target).first<{ document_json: string }>();
   if (!version) return c.json({ error: { code: 'VERSION_NOT_FOUND', message: 'Portfolio version not found' } }, 404);
-  try {
-    const validation = validatePortfolioDocument(JSON.parse(version.document_json));
-    if (!validation.valid) return c.json({ error: { code: 'INVALID_VERSION', message: 'Stored version failed validation' } }, 409);
-  } catch { return c.json({ error: { code: 'CORRUPT_VERSION', message: 'Stored version is corrupt' } }, 409); }
+  try { const validation = validatePortfolioDocument(JSON.parse(version.document_json)); if (!validation.valid) return c.json({ error: { code: 'INVALID_VERSION', message: 'Stored version failed validation' } }, 409); } catch { return c.json({ error: { code: 'CORRUPT_VERSION', message: 'Stored version is corrupt' } }, 409); }
   return publishVersion(c, site.id, target, profile.id, profile.handle);
 });
 
@@ -91,7 +84,7 @@ portfolioRoutes.post('/unpublish', async (c) => {
   return c.json({ published: false });
 });
 
-async function publishVersion(c: any, siteId: string, version: number, profileId: string, handle: string) {
+async function publishVersion(c: Parameters<typeof portfolioRoutes.post>[1] extends infer T ? T : never, siteId: string, version: number, profileId: string, handle: string) {
   const db = c.env.DB;
   const now = new Date().toISOString();
   await db.prepare(`UPDATE portfolio_versions SET published_at = ? WHERE site_id = ? AND version = ?`).bind(now, siteId, version).run();
