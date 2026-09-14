@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
+  transpilePackages: ['@skillpage/portfolio-core'],
   images: {
     unoptimized: false,
     remotePatterns: [
@@ -16,7 +17,7 @@ const nextConfig = {
     },
   },
   // Code splitting optimization
-  webpack: (config, { isServer }) => {
+  webpack: (config) => {
     config.optimization.splitChunks = {
       chunks: 'all',
       cacheGroups: {
