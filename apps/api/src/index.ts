@@ -13,6 +13,9 @@ import { messageRoutes } from './routes/messages';
 import { notificationRoutes } from './routes/notifications';
 import { adminRoutes } from './routes/admin';
 import { uploadRoutes } from './routes/uploads';
+import { reviewRoutes } from './routes/reviews';
+import { sessionRoutes } from './routes/sessions';
+import { appealRoutes } from './routes/appeals';
 import { authMiddleware } from './middleware/auth';
 
 const app = new Hono();
@@ -39,6 +42,9 @@ app.route('/api/disputes', disputeRoutes);
 app.route('/api/messages', messageRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api/uploads', uploadRoutes);
+app.route('/api/reviews', reviewRoutes);
+app.route('/api/sessions', sessionRoutes);
+app.route('/api/appeals', appealRoutes);
 
 // Admin routes (require admin role)
 app.use('/api/admin/*', authMiddleware);
