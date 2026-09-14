@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import { validatePortfolioDocument, type PortfolioDocument } from '@skillpage/portfolio-core';
 import type { JWTUser } from '../lib/jwt';
 
@@ -84,7 +85,7 @@ portfolioRoutes.post('/unpublish', async (c) => {
   return c.json({ published: false });
 });
 
-async function publishVersion(c: Parameters<typeof portfolioRoutes.post>[1] extends infer T ? T : never, siteId: string, version: number, profileId: string, handle: string) {
+async function publishVersion(c: Context, siteId: string, version: number, profileId: string, handle: string) {
   const db = c.env.DB;
   const now = new Date().toISOString();
   await db.prepare(`UPDATE portfolio_versions SET published_at = ? WHERE site_id = ? AND version = ?`).bind(now, siteId, version).run();
