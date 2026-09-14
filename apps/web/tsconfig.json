@@ -14,7 +14,11 @@
     "jsx": "preserve",
     "incremental": true,
     "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./src/*"], "@skillpage/design-tokens": ["../../packages/design-tokens/src"] }
+    "paths": {
+      "@/*": ["./src/*"],
+      "@skillpage/design-tokens": ["../../packages/design-tokens/src"],
+      "@skillpage/portfolio-core": ["../../packages/portfolio-core/src"]
+    }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": ["node_modules"]
