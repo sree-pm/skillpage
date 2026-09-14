@@ -38,19 +38,40 @@ export function clonePortfolio(document: PortfolioDocument): PortfolioDocument {
 const SECTION_TYPES: SectionType[] = ['hero','about','projects','services','experience','skills','testimonials','contact'];
 const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const URL_PROTOCOL = /^(https?:\/\/|mailto:|tel:)/i;
+const THEMES: PortfolioThemeId[] = ['minimal','editorial','studio','professional','bold'];
+const SOURCES: PortfolioSource[] = ['visual','generated','uploaded_static'];
+const text = (value: unknown, max: number) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+const optionalText = (value: unknown, max: number) => value === undefined || (typeof value === 'string' && value.length <= max);
 export function validatePortfolioDocument(value: unknown): { valid: true; document: PortfolioDocument } | { valid: false; errors: string[] } {
   const errors: string[] = [];
   if (!isPortfolioDocument(value)) return { valid: false, errors: ['Malformed portfolio document'] };
   const d = value as PortfolioDocument;
-  if (!['visual','generated','uploaded_static'].includes(d.source)) errors.push('Invalid source');
-  if (!['minimal','editorial','studio','professional','bold'].includes(d.theme)) errors.push('Invalid theme');
+  if (!SOURCES.includes(d.source)) errors.push('Invalid source');
+  if (!THEMES.includes(d.theme)) errors.push('Invalid theme');
   const p = d.profile;
-  if (!p.name.trim()) errors.push('Name is required');
+  if (!text(p.name, 120)) errors.push('Name is required and must be 120 characters or fewer');
   if (!HANDLE.test(p.handle)) errors.push('Invalid public handle');
-  if (!p.headline.trim()) errors.push('Headline is required');
-  if (!Array.isArray(p.skills) || !Array.isArray(p.projects) || !Array.isArray(p.services) || !Array.isArray(p.experience) || !Array.isArray(p.testimonials)) errors.push('Invalid profile collections');
-  for (const link of p.links || []) if (!link.label?.trim() || !URL_PROTOCOL.test(link.href || '')) errors.push('Invalid profile link');
+  if (!text(p.headline, 180)) errors.push('Headline is required and must be 180 characters or fewer');
+  if (!text(p.bio, 5000)) errors.push('About text is required and must be 5000 characters or fewer');
+  if (!optionalText(p.location, 160) || !optionalText(p.availability, 160) || !optionalText(p.avatarUrl, 2048)) errors.push('Invalid profile metadata');
+  if (!Array.isArray(p.skills) || p.skills.length > 50 || p.skills.some((s) => !text(s, 80))) errors.push('Invalid skills');
+  if (!Array.isArray(p.projects) || p.projects.length > 30) errors.push('Invalid projects');
+  else for (const item of p.projects) if (!text(item.id, 100) || !text(item.title, 160) || !text(item.description, 3000) || !Array.isArray(item.tags) || item.tags.length > 20 || item.tags.some((tag) => !text(tag, 60)) || !optionalText(item.role, 120) || !optionalText(item.year, 40) || !optionalText(item.imageUrl, 2048) || !optionalText(item.href, 2048)) errors.push('Invalid project');
+  if (!Array.isArray(p.services) || p.services.length > 20) errors.push('Invalid services');
+  else for (const item of p.services) if (!text(item.id, 100) || !text(item.title, 160) || !text(item.description, 2000) || !optionalText(item.priceFrom, 80)) errors.push('Invalid service');
+  if (!Array.isArray(p.experience) || p.experience.length > 50) errors.push('Invalid experience');
+  else for (const item of p.experience) if (!text(item.id, 100) || !text(item.company, 160) || !text(item.role, 160) || !text(item.period, 100) || !optionalText(item.description, 3000)) errors.push('Invalid experience');
+  if (!Array.isArray(p.testimonials) || p.testimonials.length > 30) errors.push('Invalid testimonials');
+  else for (const item of p.testimonials) if (!text(item.id, 100) || !text(item.quote, 1500) || !text(item.name, 160) || !optionalText(item.role, 160) || !optionalText(item.videoUrl, 2048)) errors.push('Invalid testimonial');
+  if (!Array.isArray(p.links) || p.links.length > 20) errors.push('Invalid profile links');
+  else for (const link of p.links) if (!text(link.label, 80) || !URL_PROTOCOL.test(link.href || '') || (link.href || '').length > 2048) errors.push('Invalid profile link');
+  if (!Array.isArray(d.sections) || d.sections.length > 30) errors.push('Invalid sections');
   const ids = new Set<string>();
-  for (const s of d.sections) { if (!s.id || ids.has(s.id)) errors.push('Section IDs must be unique'); ids.add(s.id); if (!SECTION_TYPES.includes(s.type) || typeof s.variant !== 'string' || typeof s.visible !== 'boolean') errors.push(`Invalid section: ${s.id}`); }
-  return errors.length ? { valid: false, errors } : { valid: true, document: d };
+  for (const s of d.sections || []) {
+    if (!text(s.id, 100) || ids.has(s.id)) errors.push('Section IDs must be unique');
+    ids.add(s.id);
+    if (!SECTION_TYPES.includes(s.type) || !SECTION_VARIANTS[s.type].some((variant) => variant.id === s.variant) || typeof s.visible !== 'boolean') errors.push(`Invalid section: ${s.id}`);
+  }
+  if (!/^#[0-9a-f]{6}$/i.test(d.settings?.accent || '') || typeof d.settings?.showAvailability !== 'boolean' || typeof d.settings?.showContact !== 'boolean' || !optionalText(d.settings?.seoTitle, 180) || !optionalText(d.settings?.seoDescription, 320)) errors.push('Invalid portfolio settings');
+  return errors.length ? { valid: false, errors: [...new Set(errors)].slice(0, 25) } : { valid: true, document: d };
 }
