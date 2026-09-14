@@ -17,6 +17,7 @@ import { reviewRoutes } from './routes/reviews';
 import { sessionRoutes } from './routes/sessions';
 import { appealRoutes } from './routes/appeals';
 import { portfolioRoutes } from './routes/portfolio';
+import { portfolioAssetRoutes } from './routes/portfolio-assets';
 import { publicPortfolioRoutes } from './routes/public-portfolio';
 import { authMiddleware } from './middleware/auth';
 
@@ -34,6 +35,7 @@ app.route('/api/portfolio/public', publicPortfolioRoutes);
 
 app.use('/api/*', authMiddleware);
 app.route('/api/portfolio', portfolioRoutes);
+app.route('/api/portfolio/assets', portfolioAssetRoutes);
 app.route('/api/proposals', proposalRoutes);
 app.route('/api/projects', projectRoutes);
 app.route('/api/milestones', milestoneRoutes);
