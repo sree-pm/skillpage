@@ -34,3 +34,26 @@ publicPortfolioRoutes.get('/:handle', async (c) => {
     'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400',
   });
 });
+
+publicPortfolioRoutes.get('/assets/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return c.json({ error: { code: 'INVALID_ASSET', message: 'Invalid asset id' } }, 400);
+
+  const asset = await c.env.DB.prepare(`
+    SELECT object_key, media_type, size_bytes
+    FROM portfolio_assets
+    WHERE id = ? AND visibility = 'public'
+    LIMIT 1
+  `).bind(id).first<{ object_key: string; media_type: string; size_bytes: number }>();
+  if (!asset) return c.json({ error: { code: 'ASSET_NOT_FOUND', message: 'Asset not found' } }, 404);
+
+  const object = await c.env.FILES.get(asset.object_key);
+  if (!object) return c.json({ error: { code: 'ASSET_NOT_FOUND', message: 'Asset not found' } }, 404);
+
+  const headers = new Headers();
+  headers.set('Content-Type', asset.media_type);
+  headers.set('Content-Length', String(asset.size_bytes));
+  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  return new Response(object.body, { headers });
+});
